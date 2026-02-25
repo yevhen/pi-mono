@@ -30,6 +30,8 @@ import { parseStreamingJson } from "../utils/json-parse.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
 import { transformMessages } from "./transform-messages.js";
 
+type OpenAIFunctionTool = Extract<OpenAITool, { type: "function" }>;
+
 // =============================================================================
 // Utilities
 // =============================================================================
@@ -46,6 +48,31 @@ function shortHash(str: string): string {
 	h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
 	h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
 	return (h2 >>> 0).toString(36) + (h1 >>> 0).toString(36);
+}
+
+function normalizeOpenAIToolSchema(node: unknown): unknown {
+	if (Array.isArray(node)) {
+		return node.map((item) => normalizeOpenAIToolSchema(item));
+	}
+
+	if (!node || typeof node !== "object") {
+		return node;
+	}
+
+	const schema = node as Record<string, unknown>;
+	const normalized = Object.fromEntries(
+		Object.entries(schema).map(([key, value]) => [key, normalizeOpenAIToolSchema(value)]),
+	) as Record<string, unknown>;
+
+	const schemaType = normalized.type;
+	const isObjectSchema =
+		schemaType === "object" || (Array.isArray(schemaType) && schemaType.some((type) => type === "object"));
+
+	if (isObjectSchema && normalized.properties === undefined) {
+		normalized.properties = {};
+	}
+
+	return normalized;
 }
 
 export interface OpenAIResponsesStreamOptions {
@@ -249,7 +276,7 @@ export function convertResponsesTools(tools: Tool[], options?: ConvertResponsesT
 		type: "function",
 		name: tool.name,
 		description: tool.description,
-		parameters: tool.parameters as any, // TypeBox already generates JSON Schema
+		parameters: normalizeOpenAIToolSchema(tool.parameters) as OpenAIFunctionTool["parameters"],
 		strict,
 	}));
 }
